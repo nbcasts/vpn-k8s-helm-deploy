@@ -1,6 +1,12 @@
 ---
 name: VPN K8s Helm Deploy
 
+description: >
+  * connect to a Wireguard VPN
+  * Setup helm
+  * Setup a connection to a k8s cluster
+  * do a helm deployment
+
 inputs:
   image_label:
     description: 'Image version to deploy'
