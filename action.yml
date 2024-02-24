@@ -1,0 +1,101 @@
+---
+name: VPN K8s Helm Deploy
+
+inputs:
+  image_label:
+    description: 'Image version to deploy'
+    required: true
+    type: string
+
+  github_token:
+    required: true
+    type: string
+
+  kubeconfig:
+    required: true
+    type: string
+  kubeconfig_context:
+    required: true
+    type: string
+
+  helm_command:
+    required: true
+    type: string
+  helm_namespace:
+    required: true
+    type: string
+
+  vpn_wireguard_endpoint:
+    required: true
+    type: string
+  vpn_wireguard_endpoint_public_key:
+    required: true
+    type: string
+  vpn_wireguard_ips:
+    required: true
+    type: string
+  vpn_wireguard_allowed_ips:
+    required: true
+    type: string
+  vpn_wireguard_private_key:
+    required: true
+    type: string
+  vpn_wireguard_preshared_key:
+    required: true
+    type: string
+
+runs:
+  using: "composite"
+
+  steps:
+    - name: Setup VPN connection
+      uses: egor-tensin/setup-wireguard@3c76633378032377324ed3e9e84873fe40267a25
+      with:
+        endpoint: ${{ inputs.vpn_wireguard_endpoint }}
+        endpoint_public_key: ${{ inputs.vpn_wireguard_endpoint_public_key }}
+        ips: ${{ inputs.vpn_wireguard_ips }}
+        allowed_ips: ${{ inputs.vpn_wireguard_allowed_ips }}
+        private_key: ${{ inputs.vpn_wireguard_private_key }}
+        preshared_key: ${{ inputs.vpn_wireguard_preshared_key }}
+
+    - uses: azure/setup-helm@v4.0.0
+      with:
+        token: ${{ inputs.github_token }}  # only needed if version is 'latest'
+
+    - uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ inputs.kubeconfig }}
+        context: ${{ inputs.kubeconfig_context }}
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.github_token }}
+
+    - name: Get image digest
+      id: find_digest
+      shell: bash
+      env:
+        IMAGE_TAG: ghcr.io/${{ github.repository }}:${{ inputs.image_label }}
+      run: |
+        echo getting digest from \`$IMAGE_TAG\` >> $GITHUB_STEP_SUMMARY
+        docker image pull $IMAGE_TAG
+        digest=$(docker inspect $IMAGE_TAG | jq -r '.[].RepoDigests | first' | cut -d @ -f 2)
+        echo digest=$digest >> $GITHUB_OUTPUT
+        echo digest=\`$digest\` >> $GITHUB_STEP_SUMMARY
+
+    - name: Helm deployment
+      working-directory: deployment
+      shell: bash
+      run: |
+        ${{
+          format(
+            '{0} --set image.digest={1} --namespace={2}',
+            inputs.helm_command,
+            steps.find_digest.outputs.digest,
+            inputs.helm_namespace
+          )
+        }}
